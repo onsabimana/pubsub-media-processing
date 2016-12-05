@@ -1,0 +1,14 @@
+runtime: python27
+api_version: 1
+threadsafe: true
+
+handlers:
+- url: /googlea[SOME_STRING].html
+  static_files: google[SOME_STRING].html
+  upload: googlea[SOME_STRING].html
+- url: /.*
+  script: main.app
+
+libraries:
+- name: ssl
+  version: latest
