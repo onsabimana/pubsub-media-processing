@@ -68,6 +68,7 @@ def main(toprocess, subscription, refresh, dataset_id, table_id):
 
         for ack_id, message in resp:
             # We need to do this to get contentType. The rest is in attributes
+            #[START msg_format]
             data = message.data
             msg_string = base64.b64decode(data)
             msg_data = json.loads(msg_string)
@@ -78,6 +79,7 @@ def main(toprocess, subscription, refresh, dataset_id, table_id):
             bucket_id = attributes['bucketId']
             object_id = attributes['objectId']
             generation = attributes['objectGeneration']
+            #[END msg_format]
 
             # Start refreshing the acknowledge deadline.
             r.start(ack_ids=[ack_id], refresh=refresh, sub=sub)
