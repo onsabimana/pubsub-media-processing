@@ -1,1 +1,0 @@
-Recommended option to setup the bucket watcher

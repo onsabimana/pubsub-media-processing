@@ -1,4 +1,4 @@
-google-api-python-client==1.5.4
+google-cloud
 requests==2.11.1
 click==6.6
 healthcheck==1.3.1

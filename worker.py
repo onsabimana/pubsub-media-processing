@@ -22,8 +22,8 @@ import time, datetime
 import requests
 import click
 
-from googleapiclient.discovery import build
-from oauth2client.client import GoogleCredentials
+from google.cloud import pubsub
+from google.cloud import storage
 
 from logger import Logger
 from recurror import Recurror
@@ -49,83 +49,68 @@ INSTANCE_ZONE = INSTANCE_ZONE_URL.split('/')[0]
 @click.option('--dataset_id', default='media_processing', help='Name of the dataset where to save transcript')
 @click.option('--table_id', default='speech', help='Name of the table where to save transcript')
 def main(toprocess, subscription, refresh, dataset_id, table_id):
-    sub = "projects/{0}/subscriptions/{1}".format(PROJECT_ID, subscription)
+    """
+    """
+    subscription_id = "projects/{0}/subscriptions/{1}".format(PROJECT_ID, subscription)
+    subscription = pubsub.subscription.Subscription(subscription_id, client=pubsub_client)
+
+    if not subscription.exists():
+        sys.stderr.write('Cannot find subscription {0}\n'.format(sys.argv[1]))
+        return
 
     r = Recurror(refresh - 10, postpone_ack)
 
     # pull() blocks until a message is received
     while True:
         #[START sub_pull]
-        # Pull the data when available.
-        resp = pubsub_client.projects().subscriptions().pull(
-            subscription=sub,
-            body={
-                "maxMessages": toprocess
-            }
-        ).execute()
+        resp = subscriptions.pull("maxMessages": toprocess)
         #[END sub_pull]
 
-        if resp:
-            # Get the amount of media that one instance can processed
-            # For this demo, we keep it to one per instance.
-            m = resp.get('receivedMessages')[0]
-            if m:
-                message = m.get('message')
-                ack_id = m.get('ackId')
-                msg_string = base64.b64decode(message.get('data'))
-                msg_data = json.loads(msg_string)
-                bucket = msg_data["bucket"]
-                filename = msg_data["name"]
-                filetype = msg_data["type"]
-                fn = filename.split('.')[0]
+        for ack_id, message in resp:
+            # We need to do this to get contentType. The rest is in attributes
+            data = message.data
+            msg_string = base64.b64decode(data)
+            msg_data = json.loads(msg_string)
+            content_type = msg_data["contentType"]
 
-                # Start refreshing the acknowledge deadline.
-                r.start(ack_ids=[ack_id], refresh=refresh, sub=sub)
+            attributes = message.attributes
+            event_type = attributes['eventType']
+            bucket_id = attributes['bucketId']
+            object_id = attributes['objectId']
+            generation = attributes['objectGeneration']
 
-                Logger.log_writer("{0} process starts".format(filename))
-                start_process = datetime.datetime.now()
+            # Start refreshing the acknowledge deadline.
+            r.start(ack_ids=[ack_id], refresh=refresh, sub=sub)
 
-# <Your custom process>
-                m = Mediator(bucket, filename, filetype, PROJECT_ID, dataset_id, table_id)
+            Logger.log_writer("{0} process starts".format(object_id))
+            start_process = datetime.datetime.now()
+
+    # <Your custom process>
+            if event_type == 'OBJECT_FINALIZE':
+                m = Mediator(bucket_id, object_id, content_type, PROJECT_ID, dataset_id, table_id)
                 m.speech_to_text()
-# <End of your custom process>
+    # <End of your custom process>
 
-                end_process = datetime.datetime.now()
-                Logger.log_writer("{0} process stops".format(filename))
+            end_process = datetime.datetime.now()
+            Logger.log_writer("{0} process stops".format(object_id))
 
-                
-                #[START ack_msg]
-                # Delete the message in the queue by acknowledging it.
-                pubsub_client.projects().subscriptions().acknowledge(
-                    subscription=sub,
-                    body={
-                        'ackIds': [ack_id]
-                    }
-                ).execute()
-                #[END ack_msg]
+            #[START ack_msg]
+            # Delete the message in the queue by acknowledging it.
+            subscription.acknowledge([ack_id])
+            #[END ack_msg]
 
-                # Logs to see what's going on.
-                Logger.log_writer(
-                    "{media_url} processed by instance {instance_hostname} in {amount_time}"
-                    .format(
-                        media_url=msg_string,
-                        instance_hostname=INSTANCE_NAME,
-                        amount_time=str(end_process - start_process)
-                    )
+            # Write logs only if needed for analytics or debugging
+            Logger.log_writer(
+                "{media_url} processed by instance {instance_hostname} in {amount_time}"
+                .format(
+                    media_url=msg_string,
+                    instance_hostname=INSTANCE_NAME,
+                    amount_time=str(end_process - start_process)
                 )
+            )
 
-                # Stop the ackDeadLine refresh until next message.
-                r.stop()
-
-def create_pubsub_client():
-    """Returns a Cloud PubSub service client for calling the API."""
-    credentials = GoogleCredentials.get_application_default()
-    return build('pubsub', 'v1', credentials=credentials)
-
-def create_gcs_client():
-    """Returns a Cloud PubSub service client for calling the API."""
-    credentials = GoogleCredentials.get_application_default()
-    return build('storage', 'v1', credentials=credentials)
+            # Stop the ackDeadLine refresh until next message.
+            r.stop()
 
 def postpone_ack(params):
     """Postpone the acknowledge deadline until the media is processed
@@ -154,8 +139,8 @@ def postpone_ack(params):
     #[END postpone_ack]
 
 """Create the API clients."""
-pubsub_client = create_pubsub_client()
-gcs_client = create_gcs_client()
+pubsub_client = pubsub.Client()
+gcs_client = storage.Client()
 
 """Launch the loop to pull media to process."""
 if __name__ == '__main__':
