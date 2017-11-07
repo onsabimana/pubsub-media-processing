@@ -63,7 +63,7 @@ def main(toprocess, subscription, refresh, dataset_id, table_id):
     # pull() blocks until a message is received
     while True:
         #[START sub_pull]
-        resp = subscriptions.pull("maxMessages": toprocess)
+        resp = subscriptions.pull({"maxMessages": toprocess})
         #[END sub_pull]
 
         for ack_id, message in resp:
